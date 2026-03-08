@@ -12,9 +12,7 @@ import os
 def install_dependencies():
     req_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
     try:
-        import flask
-        import flask_socketio
-        import requests
+        import flask, flask_socketio, requests, eventlet
     except ImportError:
         print("Installing dependencies...")
         subprocess.check_call(
@@ -22,10 +20,13 @@ def install_dependencies():
              "--user", "-q", "--no-warn-script-location"],
         )
         print("Done! Restarting...")
-        # Re-launch this same script so the newly installed packages are found
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
 install_dependencies()
+
+# Must come after install check so eventlet is guaranteed to exist
+import eventlet
+eventlet.monkey_patch()
 
 # ── Imports (after install check) ────────────────────────────────────────────
 import uuid
@@ -49,63 +50,46 @@ print(f'  Templates exist: {os.path.isdir(TEMPLATE_DIR)}')
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
 app.secret_key = "mtg-draft-secret-key"
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet", ping_timeout=60, ping_interval=25)
 
 games = {}
 
 
 # ── Card fetching ─────────────────────────────────────────────────────────────
 
-SCRYFALL_COLLECTION = "https://api.scryfall.com/cards/collection"
+SCRYFALL_NAMED = "https://api.scryfall.com/cards/named"
 
-def card_from_data(data):
-    return {
-        "id": data["id"],
-        "name": data["name"],
-        "image": (
-            data["image_uris"]["normal"]
-            if "image_uris" in data
-            else data["card_faces"][0]["image_uris"]["normal"]
-        ),
-        "mana_cost": data.get("mana_cost", ""),
-        "type_line": data.get("type_line", ""),
-        "oracle_text": data.get("oracle_text", ""),
-    }
+def fetch_card(name):
+    try:
+        r = req.get(SCRYFALL_NAMED, params={"fuzzy": name}, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            return {
+                "id": data["id"],
+                "name": data["name"],
+                "image": (
+                    data["image_uris"]["normal"]
+                    if "image_uris" in data
+                    else data["card_faces"][0]["image_uris"]["normal"]
+                ),
+                "mana_cost": data.get("mana_cost", ""),
+                "type_line": data.get("type_line", ""),
+                "oracle_text": data.get("oracle_text", ""),
+            }
+    except Exception as e:
+        print(f"Scryfall error for '{name}': {e}")
+    return None
 
 def resolve_cards(card_entries):
-    """
-    Resolve (name, count) tuples using Scryfall's /cards/collection batch endpoint.
-    Max 75 names per request, so 180 cards = just 3 API calls instead of 180.
-    Returns a flat list with duplicates expanded by count.
-    """
-    unique_names = list({name for name, count in card_entries})
-    resolved_map = {}  # lowercased name -> card object
-
-    BATCH = 75
-    for i in range(0, len(unique_names), BATCH):
-        batch = unique_names[i:i + BATCH]
-        identifiers = [{"name": name} for name in batch]
-        try:
-            r = req.post(SCRYFALL_COLLECTION, json={"identifiers": identifiers}, timeout=20)
-            if r.status_code == 200:
-                for card_data in r.json().get("data", []):
-                    resolved_map[card_data["name"].lower()] = card_from_data(card_data)
-            else:
-                print(f"Scryfall batch error: {r.status_code} {r.text[:200]}")
-        except Exception as e:
-            print(f"Scryfall collection error: {e}")
-
-    # Expand counts into flat list
     cards = []
     for name, count in card_entries:
-        card = resolved_map.get(name.lower())
+        card = fetch_card(name)
         if card:
             for _ in range(count):
                 cards.append(card)
         else:
             print(f"  Could not resolve: {name}")
     return cards
-
 # ── Draft logic helpers ───────────────────────────────────────────────────────
 
 def pass_direction(pack_num: int) -> str:

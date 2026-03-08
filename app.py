@@ -1,15 +1,14 @@
 """
 MTG Pick-2 Draft Server
-- Local: run with VS Code F5, opens browser automatically
-- Production: Railway reads PORT env var and runs via Procfile
+Run this file with VS Code's Run button (F5) or python app.py
+The browser will open automatically at http://localhost:5000
 """
 
 import subprocess
 import sys
 import os
-import inspect
 
-# ── Auto-install dependencies if missing (local dev only) ────────────────────
+# ── Auto-install dependencies if missing ─────────────────────────────────────
 def install_dependencies():
     req_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
     try:
@@ -23,13 +22,12 @@ def install_dependencies():
              "--user", "-q", "--no-warn-script-location"],
         )
         print("Done! Restarting...")
+        # Re-launch this same script so the newly installed packages are found
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
-# Only auto-install when running locally, not on Railway
-if not os.environ.get("RAILWAY_ENVIRONMENT"):
-    install_dependencies()
+install_dependencies()
 
-# ── Imports ───────────────────────────────────────────────────────────────────
+# ── Imports (after install check) ────────────────────────────────────────────
 import uuid
 import random
 import threading
@@ -39,26 +37,28 @@ from flask import Flask, render_template, request, jsonify
 from flask_socketio import SocketIO, emit, join_room
 import requests as req
 
+# Use inspect to get the real file path - most reliable method on Windows
+import inspect
 BASE_DIR = os.path.dirname(os.path.abspath(inspect.getfile(inspect.currentframe())))
-TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
+TEMPLATE_DIR = os.path.join(BASE_DIR, 'templates')
 os.chdir(BASE_DIR)
 
-app = Flask(__name__, template_folder=TEMPLATE_DIR)
-app.secret_key = os.environ.get("SECRET_KEY", "mtg-draft-local-dev-key")
+print(f'  Script dir:      {BASE_DIR}')
+print(f'  Templates dir:   {TEMPLATE_DIR}')
+print(f'  Templates exist: {os.path.isdir(TEMPLATE_DIR)}')
 
-socketio = SocketIO(
-    app,
-    cors_allowed_origins="*",
-    async_mode="gevent" if os.environ.get("RAILWAY_ENVIRONMENT") else "threading",
-)
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
+app.secret_key = "mtg-draft-secret-key"
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 games = {}
+
 SCRYFALL_NAMED = "https://api.scryfall.com/cards/named"
 
 
 # ── Card fetching ─────────────────────────────────────────────────────────────
 
-def fetch_card(name):
+def fetch_card(name: str) -> dict | None:
     try:
         r = req.get(SCRYFALL_NAMED, params={"fuzzy": name}, timeout=5)
         if r.status_code == 200:
@@ -80,7 +80,7 @@ def fetch_card(name):
     return None
 
 
-def resolve_cards(card_names):
+def resolve_cards(card_names: list[str]) -> list[dict]:
     cards = []
     for name in card_names:
         card = fetch_card(name)
@@ -93,23 +93,30 @@ def resolve_cards(card_names):
 
 # ── Draft logic helpers ───────────────────────────────────────────────────────
 
-def pass_direction(pack_num):
+def pass_direction(pack_num: int) -> str:
+    """Packs 1 & 3 pass left, pack 2 passes right."""
     return "left" if pack_num in (1, 3) else "right"
 
-def next_seat(current, direction, total=4):
+
+def next_seat(current: int, direction: str, total: int = 4) -> int:
     return (current + 1) % total if direction == "left" else (current - 1) % total
 
-def all_packs_empty(game):
+
+def all_packs_empty(game: dict) -> bool:
     return all(len(p) == 0 for p in game["packs"].values())
 
-def advance_to_next_pack(game):
+
+def advance_to_next_pack(game: dict):
+    """Move to pack 2 or 3, or end the draft."""
     game["pack_num"] += 1
     if game["pack_num"] > 3:
         game["phase"] = "done"
         return
+
     order = game["player_order"]
     for pid in order:
         game["packs"][pid] = game["player_packs"][pid][game["pack_num"] - 1]
+
     game["waiting_to_pick"] = set(order)
 
 
@@ -125,6 +132,7 @@ def create_game():
     data = request.json
     card_list_raw = data.get("cards", "")
     player_names = data.get("players", ["Player 1", "Player 2", "Player 3", "Player 4"])
+
     card_names = [c.strip() for c in card_list_raw.strip().splitlines() if c.strip()]
 
     if len(card_names) < 12:
@@ -139,19 +147,28 @@ def create_game():
 
     random.shuffle(resolved)
 
-    num_packs = 12
-    base_size = max(len(resolved) // num_packs, 2)
-    all_pack_list = []
-    idx = 0
-    for i in range(num_packs):
-        all_pack_list.append(resolved[idx: idx + base_size])
-        idx += base_size
-    for i, card in enumerate(resolved[idx:]):
-        all_pack_list[i % num_packs].append(card)
+    # Each of 12 packs (4 players x 3 packs) should have exactly 15 cards.
+    # If fewer than 180 cards provided, trim pack size proportionally but keep all packs equal.
+    PACK_SIZE = 15
+    NUM_PACKS = 12  # 4 players x 3 packs
+
+    if len(resolved) < NUM_PACKS:
+        return jsonify({"error": f"Need at least {NUM_PACKS} cards (got {len(resolved)})."}), 400
+
+    # Use exactly PACK_SIZE per pack if we have enough, otherwise divide evenly
+    pack_size = min(PACK_SIZE, len(resolved) // NUM_PACKS)
+    pack_size = max(pack_size, 1)
+
+    # Trim to exact multiple so every pack is identical size
+    total_used = pack_size * NUM_PACKS
+    resolved = resolved[:total_used]
+
+    all_pack_list = [resolved[i * pack_size:(i + 1) * pack_size] for i in range(NUM_PACKS)]
 
     game_id = str(uuid.uuid4())[:8]
     player_ids = [str(uuid.uuid4())[:8] for _ in range(4)]
 
+    # Each player gets 3 packs
     player_packs = {}
     for i, pid in enumerate(player_ids):
         player_packs[pid] = [
@@ -173,7 +190,10 @@ def create_game():
     }
     games[game_id] = game
 
-    join_links = {game["players"][pid]["name"]: f"/draft/{game_id}/{pid}" for pid in player_ids}
+    join_links = {
+        game["players"][pid]["name"]: f"/draft/{game_id}/{pid}"
+        for pid in player_ids
+    }
     return jsonify({"game_id": game_id, "links": join_links, "player_ids": player_ids})
 
 
@@ -182,8 +202,8 @@ def draft_view(game_id, player_id):
     game = games.get(game_id)
     if not game or player_id not in game["players"]:
         return "Game not found", 404
-    return render_template("draft.html", game_id=game_id, player_id=player_id,
-                           player_name=game["players"][player_id]["name"])
+    player_name = game["players"][player_id]["name"]
+    return render_template("draft.html", game_id=game_id, player_id=player_id, player_name=player_name)
 
 
 @app.route("/api/state/<game_id>/<player_id>")
@@ -191,7 +211,9 @@ def get_state(game_id, player_id):
     game = games.get(game_id)
     if not game:
         return jsonify({"error": "Game not found"}), 404
+
     waiting = player_id in game.get("waiting_to_pick", set())
+
     return jsonify({
         "phase": game["phase"],
         "pack_num": game["pack_num"],
@@ -201,8 +223,11 @@ def get_state(game_id, player_id):
         "pending": game["pending_picks"].get(player_id, []),
         "waiting_to_pick": waiting,
         "players": {
-            pid: {"name": info["name"], "pool_size": len(info["pool"]),
-                  "waiting": pid in game.get("waiting_to_pick", set())}
+            pid: {
+                "name": info["name"],
+                "pool_size": len(info["pool"]),
+                "waiting": pid in game.get("waiting_to_pick", set()),
+            }
             for pid, info in game["players"].items()
         },
     })
@@ -218,19 +243,27 @@ def on_join(data):
 
 @socketio.on("stage_pick")
 def on_stage_pick(data):
-    game_id, player_id, card_id = data["game_id"], data["player_id"], data["card_id"]
+    game_id  = data["game_id"]
+    player_id = data["player_id"]
+    card_id   = data["card_id"]
+
     game = games.get(game_id)
     if not game or game["phase"] != "drafting":
         return
+
     if player_id not in game.get("waiting_to_pick", set()):
         emit("error", {"msg": "Not your turn to pick"})
         return
+
     pending = game["pending_picks"][player_id]
-    pack = game["packs"].get(player_id, [])
-    card = next((c for c in pack if c["id"] == card_id), None)
+    pack    = game["packs"].get(player_id, [])
+    card    = next((c for c in pack if c["id"] == card_id), None)
+
     if not card:
         emit("error", {"msg": "Card not in your pack"})
         return
+
+    # Toggle selection
     if card_id in [c["id"] for c in pending]:
         game["pending_picks"][player_id] = [c for c in pending if c["id"] != card_id]
     else:
@@ -238,17 +271,23 @@ def on_stage_pick(data):
             emit("error", {"msg": "You can only pick 2 cards"})
             return
         game["pending_picks"][player_id].append(card)
+
     emit("staged", {"pending": game["pending_picks"][player_id]})
 
 
 @socketio.on("confirm_picks")
 def on_confirm_picks(data):
-    game_id, player_id = data["game_id"], data["player_id"]
-    game = games.get(game_id)
+    game_id   = data["game_id"]
+    player_id = data["player_id"]
+
+    game    = games.get(game_id)
     if not game or game["phase"] != "drafting":
         return
+
     pending = game["pending_picks"].get(player_id, [])
-    pack = game["packs"].get(player_id, [])
+    pack    = game["packs"].get(player_id, [])
+
+    # Must pick 2, unless only 1 card remains in pack
     required = min(2, len(pack))
     if len(pending) < required:
         emit("error", {"msg": f"Must select {required} card(s) before confirming"})
@@ -256,29 +295,41 @@ def on_confirm_picks(data):
     if len(pending) == 0:
         emit("error", {"msg": "No cards selected"})
         return
+
+    # Move pending picks into the player's pool
     picked_ids = {c["id"] for c in pending}
     game["players"][player_id]["pool"].extend(pending)
     game["packs"][player_id] = [c for c in pack if c["id"] not in picked_ids]
     game["pending_picks"][player_id] = []
     game["waiting_to_pick"].discard(player_id)
+
     socketio.emit("player_picked", {
         "player_id": player_id,
         "player_name": game["players"][player_id]["name"],
         "num_picked": len(pending),
     }, room=game_id)
+
+    # Once everyone has picked, pass packs
     if len(game["waiting_to_pick"]) == 0:
         direction = pass_direction(game["pack_num"])
-        order = game["player_order"]
-        new_packs = {pid: game["packs"][order[next_seat(i, direction, len(order))]]
-                     for i, pid in enumerate(order)}
+        order     = game["player_order"]
+        new_packs = {}
+
+        for i, pid in enumerate(order):
+            donor = order[next_seat(i, direction, len(order))]
+            new_packs[pid] = game["packs"][donor]
+
         for pid in order:
             game["packs"][pid] = new_packs[pid]
+
         game["waiting_to_pick"] = set(order)
+
         if all_packs_empty(game):
             advance_to_next_pack(game)
+
         socketio.emit("packs_passed", {
             "pack_num": game["pack_num"],
-            "phase": game["phase"],
+            "phase":    game["phase"],
             "direction": pass_direction(game["pack_num"]) if game["phase"] != "done" else None,
         }, room=game_id)
 
@@ -286,17 +337,14 @@ def on_confirm_picks(data):
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def open_browser():
+    """Open the browser after a short delay to let the server start."""
     webbrowser.open("http://localhost:5000")
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    is_local = not os.environ.get("RAILWAY_ENVIRONMENT")
-
     print("\n" + "="*50)
     print("  MTG Pick-2 Draft Server")
-    if is_local:
-        print(f"  Opening http://localhost:{port} ...")
-        threading.Timer(1.5, open_browser).start()
+    print("  Opening http://localhost:5000 ...")
     print("="*50 + "\n")
-
-    socketio.run(app, debug=is_local, use_reloader=False, port=port, host="0.0.0.0")
+    # Open browser after 1.5s so server is ready
+    threading.Timer(1.5, open_browser).start()
+    socketio.run(app, debug=True, use_reloader=False, port=5000, host="0.0.0.0")

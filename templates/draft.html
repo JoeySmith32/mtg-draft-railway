@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Draft — {{ player_name }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<style>
+  :root {
+    --gold: #c9a84c;
+    --gold-light: #e8c97a;
+    --ink: #0f0d09;
+    --ink-mid: #1a1209;
+    --parchment: #f5eed8;
+    --red: #8b1a1a;
+    --green: #2d6a2d;
+    --selected-glow: rgba(201,168,76,0.6);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--ink);
+    color: var(--parchment);
+    font-family: 'Crimson Pro', serif;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    background: rgba(15,13,9,0.95);
+    border-bottom: 1px solid rgba(201,168,76,0.2);
+    padding: 0.8rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+
+  .header-left h1 {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 1rem;
+    color: var(--gold);
+  }
+
+  .header-left p {
+    font-size: 0.8rem;
+    color: var(--parchment);
+    opacity: 0.5;
+    font-style: italic;
+  }
+
+  .status-bar {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+  }
+
+  .stat {
+    text-align: center;
+  }
+
+  .stat .val {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 1.1rem;
+    color: var(--gold);
+  }
+
+  .stat .lbl {
+    font-size: 0.65rem;
+    color: var(--parchment);
+    opacity: 0.4;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .direction-badge {
+    background: rgba(139,26,26,0.3);
+    border: 1px solid rgba(139,26,26,0.5);
+    border-radius: 20px;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.75rem;
+    color: #ff9999;
+    letter-spacing: 0.05em;
+  }
+
+  /* ── Player status row ── */
+  .players-row {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.6rem 1.5rem;
+    background: rgba(201,168,76,0.03);
+    border-bottom: 1px solid rgba(201,168,76,0.1);
+    flex-wrap: wrap;
+  }
+
+  .player-pill {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(245,238,216,0.05);
+    border: 1px solid rgba(201,168,76,0.15);
+    border-radius: 20px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.8rem;
+  }
+
+  .player-pill.me {
+    border-color: rgba(201,168,76,0.4);
+    background: rgba(201,168,76,0.1);
+  }
+
+  .player-pill.waiting { opacity: 0.5; }
+
+  .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--red);
+  }
+
+  .dot.ready { background: #4caf50; }
+
+  /* ── Main layout ── */
+  .main {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 0;
+    min-height: calc(100vh - 100px);
+  }
+
+  /* ── Pack area ── */
+  .pack-area {
+    padding: 1.5rem;
+    border-right: 1px solid rgba(201,168,76,0.1);
+  }
+
+  .section-title {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 0.7rem;
+    color: var(--gold);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+    opacity: 0.7;
+  }
+
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.8rem;
+  }
+
+  .draft-card {
+    position: relative;
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 2px solid transparent;
+    transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    aspect-ratio: 63/88;
+  }
+
+  .draft-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .draft-card:hover {
+    transform: translateY(-4px) scale(1.02);
+    border-color: rgba(201,168,76,0.5);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    z-index: 2;
+  }
+
+  .draft-card.selected {
+    border-color: var(--gold);
+    box-shadow: 0 0 20px var(--selected-glow), 0 8px 24px rgba(0,0,0,0.5);
+    transform: translateY(-6px) scale(1.03);
+    z-index: 3;
+  }
+
+  .draft-card.selected::after {
+    content: '✓';
+    position: absolute;
+    top: 6px; right: 6px;
+    background: var(--gold);
+    color: var(--ink);
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+  }
+
+  .draft-card .pick-num {
+    position: absolute;
+    top: 6px; right: 6px;
+    background: var(--gold);
+    color: var(--ink);
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-family: 'Cinzel Decorative', cursive;
+    font-weight: bold;
+  }
+
+  .waiting-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(15,13,9,0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    color: var(--gold);
+    text-align: center;
+    padding: 0.5rem;
+  }
+
+  /* ── Confirm bar ── */
+  .confirm-bar {
+    position: sticky;
+    bottom: 0;
+    background: rgba(15,13,9,0.97);
+    border-top: 1px solid rgba(201,168,76,0.2);
+    padding: 1rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    backdrop-filter: blur(8px);
+    transition: opacity 0.2s;
+  }
+
+  .confirm-bar.hidden { display: none; }
+
+  .picks-preview {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .mini-card {
+    width: 40px;
+    height: 56px;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--gold);
+  }
+
+  .mini-card img { width: 100%; height: 100%; object-fit: cover; }
+
+  .mini-card.empty {
+    background: rgba(201,168,76,0.1);
+    border: 1px dashed rgba(201,168,76,0.3);
+  }
+
+  .confirm-btn {
+    padding: 0.7rem 2rem;
+    background: linear-gradient(135deg, #2d6a2d, #1e4a1e);
+    border: 1px solid rgba(76,175,80,0.4);
+    border-radius: 3px;
+    color: #a8e6a8;
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .confirm-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, #3d8a3d, #2d6a2d);
+    box-shadow: 0 0 15px rgba(76,175,80,0.3);
+  }
+
+  .confirm-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Pool sidebar ── */
+  .pool-sidebar {
+    padding: 1.5rem 1rem;
+    overflow-y: auto;
+    max-height: calc(100vh - 100px);
+  }
+
+  .pool-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px;
+    margin-top: 0.5rem;
+  }
+
+  .pool-card {
+    aspect-ratio: 63/88;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .pool-card img { width: 100%; height: 100%; object-fit: cover; }
+
+  /* ── States ── */
+  .waiting-msg {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--gold);
+    font-style: italic;
+    font-size: 1.1rem;
+    opacity: 0.6;
+  }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .pulsing { animation: pulse 2s infinite; }
+
+  .done-banner {
+    text-align: center;
+    padding: 3rem;
+    display: none;
+  }
+
+  .done-banner h2 {
+    font-family: 'Cinzel Decorative', cursive;
+    color: var(--gold);
+    font-size: 1.8rem;
+    margin-bottom: 1rem;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(26,18,9,0.95);
+    border: 1px solid var(--gold);
+    padding: 0.6rem 1.2rem;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    color: var(--gold-light);
+    z-index: 200;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <h1>{{ player_name }}</h1>
+    <p id="pack-label">Loading...</p>
+  </div>
+  <div class="status-bar">
+    <div class="stat">
+      <div class="val" id="pool-count">0</div>
+      <div class="lbl">In Pool</div>
+    </div>
+    <div class="stat">
+      <div class="val" id="pack-size">–</div>
+      <div class="lbl">In Pack</div>
+    </div>
+    <div class="direction-badge" id="direction-badge">← Left</div>
+  </div>
+</header>
+
+<div class="players-row" id="players-row"></div>
+
+<div class="main">
+  <div class="pack-area" id="pack-area">
+    <div class="section-title">Current Pack</div>
+    <div class="card-grid" id="card-grid">
+      <div class="waiting-msg pulsing">Connecting to game...</div>
+    </div>
+    <div id="done-banner" class="done-banner">
+      <h2>Draft Complete!</h2>
+      <p style="color:var(--parchment);opacity:0.7">You drafted <span id="final-count"></span> cards.<br>Build your 40-card deck below!</p>
+    </div>
+  </div>
+
+  <div class="pool-sidebar">
+    <div class="section-title">Your Pool (<span id="pool-count2">0</span>)</div>
+    <div class="pool-grid" id="pool-grid"></div>
+  </div>
+</div>
+
+<div class="confirm-bar hidden" id="confirm-bar">
+  <div class="picks-preview" id="picks-preview">
+    <div class="mini-card empty" id="slot1"></div>
+    <div class="mini-card empty" id="slot2"></div>
+    <span style="font-size:0.85rem;opacity:0.6;margin-left:0.5rem" id="pick-count-label">0/2 selected</span>
+  </div>
+  <button class="confirm-btn" id="confirm-btn" onclick="confirmPicks()" disabled>
+    Lock In Picks
+  </button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const GAME_ID = "{{ game_id }}";
+const PLAYER_ID = "{{ player_id }}";
+const PLAYER_NAME = "{{ player_name }}";
+
+let state = null;
+let pending = [];
+
+const socket = io();
+
+socket.on('connect', () => {
+  socket.emit('join', { game_id: GAME_ID, player_id: PLAYER_ID });
+  loadState();
+});
+
+socket.on('packs_passed', () => {
+  showToast('Packs passed! New pack arrived.');
+  loadState();
+});
+
+socket.on('player_picked', (data) => {
+  if (data.player_id !== PLAYER_ID) {
+    showToast(`${data.player_name} picked ${data.num_picked} card(s)`);
+    loadState();
+  }
+});
+
+socket.on('staged', (data) => {
+  pending = data.pending;
+  renderPending();
+});
+
+socket.on('error', (data) => {
+  showToast('⚠ ' + data.msg);
+});
+
+async function loadState() {
+  const res = await fetch(`/api/state/${GAME_ID}/${PLAYER_ID}`);
+  state = await res.json();
+  renderState();
+}
+
+function renderState() {
+  if (!state) return;
+
+  // Header
+  document.getElementById('pack-label').textContent =
+    state.phase === 'done' ? 'Draft Complete' :
+    `Pack ${state.pack_num} of 3 · Pass ${state.direction === 'left' ? '← Left' : 'Right →'}`;
+
+  document.getElementById('pool-count').textContent = state.pool.length;
+  document.getElementById('pool-count2').textContent = state.pool.length;
+  document.getElementById('pack-size').textContent = state.pack.length;
+  document.getElementById('direction-badge').textContent =
+    state.direction === 'left' ? '← Pass Left' : 'Pass Right →';
+
+  // Players row
+  const prow = document.getElementById('players-row');
+  prow.innerHTML = '';
+  for (const [pid, p] of Object.entries(state.players)) {
+    const pill = document.createElement('div');
+    pill.className = `player-pill${pid === PLAYER_ID ? ' me' : ''}${p.waiting ? '' : ' waiting'}`;
+    pill.innerHTML = `<div class="dot${p.waiting ? '' : ' ready'}"></div>${p.name} (${p.pool_size})`;
+    prow.appendChild(pill);
+  }
+
+  // Pack grid
+  const grid = document.getElementById('card-grid');
+  const doneBanner = document.getElementById('done-banner');
+
+  if (state.phase === 'done') {
+    grid.innerHTML = '';
+    doneBanner.style.display = 'block';
+    document.getElementById('final-count').textContent = state.pool.length;
+    document.getElementById('confirm-bar').classList.add('hidden');
+  } else if (!state.waiting_to_pick) {
+    grid.innerHTML = `<div class="waiting-msg pulsing">Waiting for other players to pick...</div>`;
+    document.getElementById('confirm-bar').classList.add('hidden');
+  } else if (state.pack.length === 0) {
+    grid.innerHTML = `<div class="waiting-msg pulsing">Waiting for pack to arrive...</div>`;
+    document.getElementById('confirm-bar').classList.add('hidden');
+  } else {
+    doneBanner.style.display = 'none';
+    grid.innerHTML = '';
+    const pendingIds = new Set(pending.map(c => c.id));
+
+    for (const card of state.pack) {
+      const div = document.createElement('div');
+      const isSelected = pendingIds.has(card.id);
+      const pickIdx = pending.findIndex(c => c.id === card.id);
+      div.className = `draft-card${isSelected ? ' selected' : ''}`;
+      div.dataset.id = card.id;
+      div.innerHTML = `<img src="${card.image}" alt="${card.name}" loading="lazy" title="${card.name}">`;
+      if (isSelected) {
+        const badge = document.createElement('div');
+        badge.className = 'pick-num';
+        badge.textContent = pickIdx + 1;
+        div.appendChild(badge);
+      }
+      div.addEventListener('click', () => stagePick(card.id));
+      grid.appendChild(div);
+    }
+
+    document.getElementById('confirm-bar').classList.remove('hidden');
+    renderPending();
+  }
+
+  // Pool
+  const poolGrid = document.getElementById('pool-grid');
+  poolGrid.innerHTML = '';
+  for (const card of state.pool) {
+    const div = document.createElement('div');
+    div.className = 'pool-card';
+    div.innerHTML = `<img src="${card.image}" alt="${card.name}" title="${card.name}" loading="lazy">`;
+    poolGrid.appendChild(div);
+  }
+}
+
+function renderPending() {
+  const slot1 = document.getElementById('slot1');
+  const slot2 = document.getElementById('slot2');
+  const label = document.getElementById('pick-count-label');
+  const btn = document.getElementById('confirm-btn');
+
+  slot1.innerHTML = pending[0] ? `<img src="${pending[0].image}" alt="${pending[0].name}">` : '';
+  slot1.className = `mini-card${pending[0] ? '' : ' empty'}`;
+  slot2.innerHTML = pending[1] ? `<img src="${pending[1].image}" alt="${pending[1].name}">` : '';
+  slot2.className = `mini-card${pending[1] ? '' : ' empty'}`;
+
+  const packSize = state?.pack?.length ?? 0;
+  const needed = packSize === 1 ? 1 : 2;
+  label.textContent = `${pending.length}/${needed} selected`;
+  btn.disabled = pending.length < needed;
+
+  // Also update card grid selection visuals
+  const allCards = document.querySelectorAll('.draft-card');
+  const pendingIds = new Set(pending.map(c => c.id));
+  allCards.forEach(el => {
+    const id = el.dataset.id;
+    el.classList.toggle('selected', pendingIds.has(id));
+    const existing = el.querySelector('.pick-num');
+    if (existing) existing.remove();
+    if (pendingIds.has(id)) {
+      const idx = pending.findIndex(c => c.id === id);
+      const badge = document.createElement('div');
+      badge.className = 'pick-num';
+      badge.textContent = idx + 1;
+      el.appendChild(badge);
+    }
+  });
+}
+
+function stagePick(cardId) {
+  socket.emit('stage_pick', { game_id: GAME_ID, player_id: PLAYER_ID, card_id: cardId });
+}
+
+function confirmPicks() {
+  document.getElementById('confirm-btn').disabled = true;
+  socket.emit('confirm_picks', { game_id: GAME_ID, player_id: PLAYER_ID });
+  pending = [];
+  loadState();
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// Poll every 3s as a fallback
+setInterval(loadState, 3000);
+</script>
+</body>
+</html>

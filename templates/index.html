@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pick-2 Draft</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #c9a84c;
+    --gold-light: #e8c97a;
+    --ink: #1a1209;
+    --parchment: #f5eed8;
+    --parchment-dark: #e8dcc0;
+    --red: #8b1a1a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--ink);
+    color: var(--parchment);
+    font-family: 'Crimson Pro', serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-image:
+      radial-gradient(ellipse at 20% 50%, rgba(139,26,26,0.15) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 50%, rgba(201,168,76,0.08) 0%, transparent 60%);
+  }
+
+  .container {
+    width: 100%;
+    max-width: 680px;
+    padding: 2rem;
+  }
+
+  h1 {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: clamp(1.6rem, 4vw, 2.4rem);
+    color: var(--gold);
+    text-align: center;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.3rem;
+    text-shadow: 0 0 40px rgba(201,168,76,0.3);
+  }
+
+  .subtitle {
+    text-align: center;
+    color: var(--gold-light);
+    opacity: 0.6;
+    font-style: italic;
+    font-size: 1rem;
+    margin-bottom: 2.5rem;
+    letter-spacing: 0.1em;
+  }
+
+  .card {
+    background: rgba(245,238,216,0.05);
+    border: 1px solid rgba(201,168,76,0.25);
+    border-radius: 4px;
+    padding: 1.8rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .card h2 {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 0.8rem;
+    color: var(--gold);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    margin-bottom: 1.2rem;
+    opacity: 0.8;
+  }
+
+  .player-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 0;
+  }
+
+  label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--gold-light);
+    opacity: 0.7;
+    margin-bottom: 0.3rem;
+    letter-spacing: 0.05em;
+  }
+
+  input[type="text"], textarea {
+    width: 100%;
+    background: rgba(245,238,216,0.07);
+    border: 1px solid rgba(201,168,76,0.2);
+    border-radius: 3px;
+    color: var(--parchment);
+    font-family: 'Crimson Pro', serif;
+    font-size: 1rem;
+    padding: 0.6rem 0.8rem;
+    transition: border-color 0.2s;
+    outline: none;
+  }
+
+  input[type="text"]:focus, textarea:focus {
+    border-color: var(--gold);
+    background: rgba(245,238,216,0.1);
+  }
+
+  textarea {
+    resize: vertical;
+    min-height: 180px;
+    font-size: 0.9rem;
+    line-height: 1.6;
+  }
+
+  .hint {
+    font-size: 0.8rem;
+    color: var(--parchment);
+    opacity: 0.4;
+    margin-top: 0.5rem;
+    font-style: italic;
+  }
+
+  .rules {
+    background: rgba(139,26,26,0.15);
+    border-left: 3px solid var(--red);
+    padding: 1rem 1.2rem;
+    border-radius: 0 3px 3px 0;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: var(--parchment);
+    opacity: 0.8;
+    margin-bottom: 1.5rem;
+  }
+
+  .rules strong { color: var(--gold-light); }
+
+  button {
+    width: 100%;
+    padding: 1rem;
+    background: linear-gradient(135deg, #8b1a1a, #6b1212);
+    border: 1px solid rgba(201,168,76,0.4);
+    border-radius: 3px;
+    color: var(--gold-light);
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 0.9rem;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  button:hover {
+    background: linear-gradient(135deg, #a82020, #8b1a1a);
+    border-color: var(--gold);
+    box-shadow: 0 0 20px rgba(139,26,26,0.4);
+  }
+
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .links-section {
+    margin-top: 2rem;
+    display: none;
+  }
+
+  .links-section h2 {
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 0.8rem;
+    color: var(--gold);
+    letter-spacing: 0.2em;
+    margin-bottom: 1rem;
+    opacity: 0.8;
+  }
+
+  .player-link {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: rgba(245,238,216,0.05);
+    border: 1px solid rgba(201,168,76,0.2);
+    border-radius: 3px;
+    padding: 0.8rem 1rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .player-link span { font-size: 1rem; }
+
+  .copy-btn {
+    width: auto;
+    padding: 0.3rem 0.8rem;
+    font-size: 0.7rem;
+    background: rgba(201,168,76,0.15);
+    border-color: rgba(201,168,76,0.3);
+  }
+
+  .error {
+    color: #ff6b6b;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+    display: none;
+  }
+
+  .loading {
+    text-align: center;
+    color: var(--gold);
+    font-style: italic;
+    padding: 1rem;
+    display: none;
+  }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+  .loading { animation: pulse 1.5s infinite; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Pick-2 Draft</h1>
+  <p class="subtitle">— for four players —</p>
+
+  <div class="rules">
+    <strong>How it works:</strong> Each player starts with 3 packs of 15 cards.
+    Pick <strong>2 cards</strong>, pass the pack. Pack 1 &amp; 3 pass <strong>left</strong>,
+    pack 2 passes <strong>right</strong>. End with ~42 cards to build a 40-card deck.
+  </div>
+
+  <div class="card">
+    <h2>Players</h2>
+    <div class="player-grid">
+      <div>
+        <label>Player 1</label>
+        <input type="text" id="p1" value="Player 1">
+      </div>
+      <div>
+        <label>Player 2</label>
+        <input type="text" id="p2" value="Player 2">
+      </div>
+      <div>
+        <label>Player 3</label>
+        <input type="text" id="p3" value="Player 3">
+      </div>
+      <div>
+        <label>Player 4</label>
+        <input type="text" id="p4" value="Player 4">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Card List</h2>
+    <textarea id="cards" placeholder="Lightning Bolt&#10;Counterspell&#10;Llanowar Elves&#10;...one card name per line"></textarea>
+    <p class="hint">Enter one card name per line. You need at least 45 cards (ideally 180 for a full draft).</p>
+    <p class="error" id="error-msg"></p>
+  </div>
+
+  <button id="create-btn" onclick="createGame()">Begin the Draft</button>
+  <p class="loading" id="loading">Consulting the Oracle... fetching cards from Scryfall...</p>
+
+  <div class="links-section" id="links-section">
+    <h2>Share These Links With Each Player</h2>
+    <div id="links-container"></div>
+  </div>
+</div>
+
+<script>
+async function createGame() {
+  const btn = document.getElementById('create-btn');
+  const loading = document.getElementById('loading');
+  const errEl = document.getElementById('error-msg');
+  errEl.style.display = 'none';
+
+  const players = [
+    document.getElementById('p1').value || 'Player 1',
+    document.getElementById('p2').value || 'Player 2',
+    document.getElementById('p3').value || 'Player 3',
+    document.getElementById('p4').value || 'Player 4',
+  ];
+  const cards = document.getElementById('cards').value;
+
+  if (!cards.trim()) {
+    errEl.textContent = 'Please enter a card list.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  loading.style.display = 'block';
+
+  try {
+    const res = await fetch('/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ players, cards }),
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      errEl.textContent = data.error;
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      loading.style.display = 'none';
+      return;
+    }
+
+    loading.style.display = 'none';
+    document.getElementById('links-section').style.display = 'block';
+    const container = document.getElementById('links-container');
+    container.innerHTML = '';
+
+    for (const [name, path] of Object.entries(data.links)) {
+      const url = window.location.origin + path;
+      const div = document.createElement('div');
+      div.className = 'player-link';
+      div.innerHTML = `
+        <span>${name}</span>
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <a href="${url}" target="_blank" style="color:var(--gold-light);font-size:0.85rem">${url}</a>
+          <button class="copy-btn" onclick="copyLink('${url}', this)">Copy</button>
+        </div>
+      `;
+      container.appendChild(div);
+    }
+  } catch (e) {
+    errEl.textContent = 'Server error. Is the server running?';
+    errEl.style.display = 'block';
+    btn.disabled = false;
+    loading.style.display = 'none';
+  }
+}
+
+function copyLink(url, btn) {
+  navigator.clipboard.writeText(url);
+  btn.textContent = 'Copied!';
+  setTimeout(() => btn.textContent = 'Copy', 2000);
+}
+</script>
+</body>
+</html>

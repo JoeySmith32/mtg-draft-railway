@@ -12,7 +12,7 @@ import os
 def install_dependencies():
     req_file = os.path.join(os.path.dirname(__file__), "requirements.txt")
     try:
-        import flask, flask_socketio, requests, eventlet
+        import flask, flask_socketio, requests
     except ImportError:
         print("Installing dependencies...")
         subprocess.check_call(
@@ -23,10 +23,6 @@ def install_dependencies():
         os.execv(sys.executable, [sys.executable] + sys.argv)
 
 install_dependencies()
-
-# Must come after install check so eventlet is guaranteed to exist
-import eventlet
-eventlet.monkey_patch()
 
 # ── Imports (after install check) ────────────────────────────────────────────
 import uuid
@@ -50,7 +46,7 @@ print(f'  Templates exist: {os.path.isdir(TEMPLATE_DIR)}')
 
 app = Flask(__name__, template_folder=TEMPLATE_DIR)
 app.secret_key = "mtg-draft-secret-key"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet", ping_timeout=60, ping_interval=25)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", ping_timeout=60, ping_interval=25)
 
 games = {}
 

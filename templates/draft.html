@@ -322,8 +322,7 @@
   .pulsing { animation: pulse 2s infinite; }
 
   .done-banner {
-    text-align: center;
-    padding: 3rem;
+    padding: 2rem;
     display: none;
   }
 
@@ -331,7 +330,52 @@
     font-family: 'Cinzel Decorative', cursive;
     color: var(--gold);
     font-size: 1.8rem;
+    margin-bottom: 0.5rem;
+    text-align: center;
+  }
+
+  .done-banner .subtitle {
+    text-align: center;
+    color: var(--parchment);
+    opacity: 0.6;
+    font-style: italic;
+    margin-bottom: 1.5rem;
+  }
+
+  .card-list-box {
+    background: rgba(245,238,216,0.05);
+    border: 1px solid rgba(201,168,76,0.2);
+    border-radius: 4px;
+    padding: 1rem 1.2rem;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85rem;
+    line-height: 1.8;
+    color: var(--parchment);
+    white-space: pre;
+    max-height: 400px;
+    overflow-y: auto;
     margin-bottom: 1rem;
+    text-align: left;
+  }
+
+  .copy-list-btn {
+    display: block;
+    width: 100%;
+    padding: 0.8rem;
+    background: linear-gradient(135deg, rgba(201,168,76,0.2), rgba(201,168,76,0.1));
+    border: 1px solid rgba(201,168,76,0.4);
+    border-radius: 3px;
+    color: var(--gold-light);
+    font-family: 'Cinzel Decorative', cursive;
+    font-size: 0.8rem;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .copy-list-btn:hover {
+    background: linear-gradient(135deg, rgba(201,168,76,0.35), rgba(201,168,76,0.2));
+    border-color: var(--gold);
   }
 
   .toast {
@@ -384,7 +428,9 @@
     </div>
     <div id="done-banner" class="done-banner">
       <h2>Draft Complete!</h2>
-      <p style="color:var(--parchment);opacity:0.7">You drafted <span id="final-count"></span> cards.<br>Build your 40-card deck below!</p>
+      <p class="subtitle">You drafted <span id="final-count"></span> cards &mdash; build your 40-card deck!</p>
+      <div class="card-list-box" id="card-list-box"></div>
+      <button class="copy-list-btn" onclick="copyCardList()">Copy Card List to Clipboard</button>
     </div>
   </div>
 
@@ -482,6 +528,16 @@ function renderState() {
     doneBanner.style.display = 'block';
     document.getElementById('final-count').textContent = state.pool.length;
     document.getElementById('confirm-bar').classList.add('hidden');
+    // Build card list grouped by name with counts
+    const counts = {};
+    for (const card of state.pool) {
+      counts[card.name] = (counts[card.name] || 0) + 1;
+    }
+    const lines = Object.entries(counts)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([name, count]) => `${count}x ${name}`)
+      .join('\n');
+    document.getElementById('card-list-box').textContent = lines;
   } else if (!state.waiting_to_pick) {
     grid.innerHTML = `<div class="waiting-msg pulsing">Waiting for other players to pick...</div>`;
     document.getElementById('confirm-bar').classList.add('hidden');
@@ -570,6 +626,15 @@ function confirmPicks() {
   loadState();
 }
 
+function copyCardList() {
+  const text = document.getElementById('card-list-box').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-list-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy Card List to Clipboard', 2000);
+  });
+}
+
 function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -577,8 +642,8 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// Fallback poll every 10s only - WebSocket events handle real-time updates
-setInterval(loadState, 10000);
+// Poll every 3s as a fallback
+setInterval(loadState, 3000);
 </script>
 </body>
 </html>

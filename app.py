@@ -80,12 +80,22 @@ def fetch_card(name):
     return None
 
 
-def resolve_cards(card_names):
+def resolve_cards(card_entries):
+    """Accept either plain name strings or (name, count) tuples."""
     cards = []
-    for name in card_names:
+    for entry in card_entries:
+        if isinstance(entry, tuple):
+            name, count = entry
+        else:
+            name, count = entry, 1
         card = fetch_card(name)
         if card:
-            cards.append(card)
+            # Add 'count' copies, each with a unique id so they can be drafted separately
+            for i in range(count):
+                copy = dict(card)
+                if i > 0:
+                    copy["id"] = card["id"] + f"_copy{i}"
+                cards.append(copy)
         else:
             print(f"  Could not resolve: {name}")
     return cards
@@ -125,29 +135,42 @@ def create_game():
     data = request.json
     card_list_raw = data.get("cards", "")
     player_names = data.get("players", ["Player 1", "Player 2", "Player 3", "Player 4"])
-    card_names = [c.strip() for c in card_list_raw.strip().splitlines() if c.strip()]
 
-    if len(card_names) < 12:
-        return jsonify({"error": "Need at least 12 cards to start a draft."}), 400
+    # Support both plain names and "2x Card Name" format
+    import re as _re
+    card_entries = []
+    total_count = 0
+    for line in card_list_raw.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m = _re.match(r'^(\d+)\s*[xX]\s+(.+)$', line)
+        if m:
+            count = int(m.group(1))
+            name = m.group(2).strip()
+        else:
+            count = 1
+            name = line
+        card_entries.append((name, count))
+        total_count += count
 
-    print(f"\nResolving {len(card_names)} cards via Scryfall...")
-    resolved = resolve_cards(card_names)
+    if total_count != 180:
+        return jsonify({"error": f"Your list has {total_count} cards. Please provide exactly 180 cards (15 per pack × 3 packs × 4 players)."}), 400
+
+    print(f"\nResolving {len(card_entries)} unique card names ({total_count} total) via Scryfall...")
+    resolved = resolve_cards(card_entries)
     print(f"Resolved {len(resolved)} cards successfully.\n")
 
-    if len(resolved) < 12:
-        return jsonify({"error": f"Only resolved {len(resolved)} cards. Need at least 12."}), 400
+    if len(resolved) < 180:
+        return jsonify({"error": f"Only resolved {len(resolved)}/180 cards. Check your card names."}), 400
 
     random.shuffle(resolved)
 
-    num_packs = 12
-    base_size = max(len(resolved) // num_packs, 2)
-    all_pack_list = []
-    idx = 0
-    for i in range(num_packs):
-        all_pack_list.append(resolved[idx: idx + base_size])
-        idx += base_size
-    for i, card in enumerate(resolved[idx:]):
-        all_pack_list[i % num_packs].append(card)
+    # Split into exactly 12 packs of exactly 15 cards each
+    PACK_SIZE = 15
+    NUM_PACKS = 12
+    resolved = resolved[:180]
+    all_pack_list = [resolved[i * PACK_SIZE:(i + 1) * PACK_SIZE] for i in range(NUM_PACKS)]
 
     game_id = str(uuid.uuid4())[:8]
     player_ids = [str(uuid.uuid4())[:8] for _ in range(4)]

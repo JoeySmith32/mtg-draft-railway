@@ -53,43 +53,58 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 games = {}
 
-SCRYFALL_NAMED = "https://api.scryfall.com/cards/named"
-
 
 # ── Card fetching ─────────────────────────────────────────────────────────────
 
-def fetch_card(name: str) -> dict | None:
-    try:
-        r = req.get(SCRYFALL_NAMED, params={"fuzzy": name}, timeout=5)
-        if r.status_code == 200:
-            data = r.json()
-            return {
-                "id": data["id"],
-                "name": data["name"],
-                "image": (
-                    data["image_uris"]["normal"]
-                    if "image_uris" in data
-                    else data["card_faces"][0]["image_uris"]["normal"]
-                ),
-                "mana_cost": data.get("mana_cost", ""),
-                "type_line": data.get("type_line", ""),
-                "oracle_text": data.get("oracle_text", ""),
-            }
-    except Exception as e:
-        print(f"Scryfall error for '{name}': {e}")
-    return None
+SCRYFALL_COLLECTION = "https://api.scryfall.com/cards/collection"
 
+def card_from_data(data):
+    return {
+        "id": data["id"],
+        "name": data["name"],
+        "image": (
+            data["image_uris"]["normal"]
+            if "image_uris" in data
+            else data["card_faces"][0]["image_uris"]["normal"]
+        ),
+        "mana_cost": data.get("mana_cost", ""),
+        "type_line": data.get("type_line", ""),
+        "oracle_text": data.get("oracle_text", ""),
+    }
 
-def resolve_cards(card_names: list[str]) -> list[dict]:
+def resolve_cards(card_entries):
+    """
+    Resolve (name, count) tuples using Scryfall's /cards/collection batch endpoint.
+    Max 75 names per request, so 180 cards = just 3 API calls instead of 180.
+    Returns a flat list with duplicates expanded by count.
+    """
+    unique_names = list({name for name, count in card_entries})
+    resolved_map = {}  # lowercased name -> card object
+
+    BATCH = 75
+    for i in range(0, len(unique_names), BATCH):
+        batch = unique_names[i:i + BATCH]
+        identifiers = [{"name": name} for name in batch]
+        try:
+            r = req.post(SCRYFALL_COLLECTION, json={"identifiers": identifiers}, timeout=20)
+            if r.status_code == 200:
+                for card_data in r.json().get("data", []):
+                    resolved_map[card_data["name"].lower()] = card_from_data(card_data)
+            else:
+                print(f"Scryfall batch error: {r.status_code} {r.text[:200]}")
+        except Exception as e:
+            print(f"Scryfall collection error: {e}")
+
+    # Expand counts into flat list
     cards = []
-    for name in card_names:
-        card = fetch_card(name)
+    for name, count in card_entries:
+        card = resolved_map.get(name.lower())
         if card:
-            cards.append(card)
+            for _ in range(count):
+                cards.append(card)
         else:
             print(f"  Could not resolve: {name}")
     return cards
-
 
 # ── Draft logic helpers ───────────────────────────────────────────────────────
 
@@ -133,37 +148,42 @@ def create_game():
     card_list_raw = data.get("cards", "")
     player_names = data.get("players", ["Player 1", "Player 2", "Player 3", "Player 4"])
 
-    card_names = [c.strip() for c in card_list_raw.strip().splitlines() if c.strip()]
+    # Parse card list — supports both plain names and "2x Card Name" / "2 x Card Name" format
+    import re as _re
+    card_entries = []  # list of (name, count) tuples
+    total_count = 0
+    for line in card_list_raw.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        # Match optional leading count like "2x", "2 x", "2 X", or just a plain name
+        m = _re.match(r'^(\d+)\s*[xX]\s+(.+)$', line)
+        if m:
+            count = int(m.group(1))
+            name = m.group(2).strip()
+        else:
+            count = 1
+            name = line
+        card_entries.append((name, count))
+        total_count += count
 
-    if len(card_names) < 12:
-        return jsonify({"error": "Need at least 12 cards to start a draft."}), 400
+    if total_count != 180:
+        return jsonify({"error": f"Your list has {total_count} cards. Please provide exactly 180 cards (15 per pack × 3 packs × 4 players)."}), 400
 
-    print(f"\nResolving {len(card_names)} cards via Scryfall...")
-    resolved = resolve_cards(card_names)
+    print(f"\nResolving {len(card_entries)} unique card names ({total_count} total) via Scryfall...")
+    resolved = resolve_cards(card_entries)
     print(f"Resolved {len(resolved)} cards successfully.\n")
 
-    if len(resolved) < 12:
-        return jsonify({"error": f"Only resolved {len(resolved)} cards. Need at least 12."}), 400
+    if len(resolved) < 180:
+        return jsonify({"error": f"Only resolved {len(resolved)}/180 cards. Check your card names."}), 400
 
     random.shuffle(resolved)
 
-    # Each of 12 packs (4 players x 3 packs) should have exactly 15 cards.
-    # If fewer than 180 cards provided, trim pack size proportionally but keep all packs equal.
+    # Split into exactly 12 packs of 15 cards each
     PACK_SIZE = 15
-    NUM_PACKS = 12  # 4 players x 3 packs
-
-    if len(resolved) < NUM_PACKS:
-        return jsonify({"error": f"Need at least {NUM_PACKS} cards (got {len(resolved)})."}), 400
-
-    # Use exactly PACK_SIZE per pack if we have enough, otherwise divide evenly
-    pack_size = min(PACK_SIZE, len(resolved) // NUM_PACKS)
-    pack_size = max(pack_size, 1)
-
-    # Trim to exact multiple so every pack is identical size
-    total_used = pack_size * NUM_PACKS
-    resolved = resolved[:total_used]
-
-    all_pack_list = [resolved[i * pack_size:(i + 1) * pack_size] for i in range(NUM_PACKS)]
+    NUM_PACKS = 12
+    resolved = resolved[:180]
+    all_pack_list = [resolved[i * PACK_SIZE:(i + 1) * PACK_SIZE] for i in range(NUM_PACKS)]
 
     game_id = str(uuid.uuid4())[:8]
     player_ids = [str(uuid.uuid4())[:8] for _ in range(4)]
